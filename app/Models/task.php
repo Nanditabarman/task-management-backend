@@ -12,8 +12,24 @@ class Task extends Model
         'title',
         'description',
         'deadline',
-        'status_id',
         'assinged_by',
         'assigned_to',
     ];
+    public function assignments()
+    {
+        return $this->hasMany(TaskAssignment::class);
+    }
+
+    public function employees()
+    {
+        return $this->belongsToMany(Employee::class, 'task_assignments', 'task_id', 'employee_id');
+    }
+
+    public function statuses()
+{
+    return $this->hasMany(TaskStatus::class);
+}
+
+
+
 }

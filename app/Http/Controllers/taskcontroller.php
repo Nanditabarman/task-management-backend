@@ -4,137 +4,138 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Task;
-use App\Models\Status;
+use App\Models\TaskStatus;
+use App\Models\TaskAssignment;
 use App\Models\User;
+use App\Mail\TaskAssigned;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
 
-class Taskcontroller extends Controller
+class TaskController extends Controller
 {
-    // public function index(){
-    //     $tasks = Task::all(); // Fetch all tasks from the database
-    //     return view('tasks.store', compact( 'tasks'));
-    // }
     public function index()
     {
-        $tasks = Task::all();
-
+        $tasks = Task::with(['employees', 'statuses'])->get();
         return response()->json(['tasks' => $tasks]);
     }
 
 
-    public function create(){
-        $users = User::all(); // Retrieve all registered users
+    public function create()
+    {
+        $users = User::all();
         return view('tasks.create', compact('users'));
     }
 
     public function store(Request $request)
     {
-        // Define validation rules
-        $rules = [
+        $validated = $request->validate([
             'title' => 'required|max:255',
             'description' => 'required',
-            // 'deadline' => 'required|date|after_or_equal:today', // Ensure it's not after today
-            'status_id' => 'required',
-            'deadline' => 'required',
-            'assinged_by' => 'required',
-            'assigned_to' => 'required',
-        ];
-
-        // Define custom validation messages
-        $messages = [
-            'deadline.after_or_equal' => 'The deadline must be today or a date after today.',
-        ];
-
-        // Validate the request data
-        $request->validate($rules, $messages);
-
-        // If validation passes, create the task
-        Task::create([
-            'title' => $request->title,
-            'description' => $request->description,
-            'deadline' => $request->deadline,
-            'status_id' => $request->status_id,
-            'assinged_by' => $request->assinged_by,
-            'assigned_to' => $request->assigned_to,
+            'deadline' => 'required|date',
+            'assigned_to' => 'required|exists:employees,id',
         ]);
 
-        return response()->json([
-        'status' => true,
-        'message' => 'Task created successfully',
-    ]);
+        $task = Task::create([
+            'title' => $validated['title'],
+            'description' => $validated['description'],
+            'deadline' => $validated['deadline'],
+            'assigned_by' => Auth::id(),
+            'assigned_to' => $validated['assigned_to'],
+        ]);
+
+        TaskAssignment::create([
+            'task_id' => $task->id,
+            'employee_id' => $validated['assigned_to'],
+        ]);
+
+        $employee = \App\Models\Employee::find($validated['assigned_to']);
+        Log::info('Sending email to: ' . $employee->email);
+
+        Mail::to($employee->email)->send(new TaskAssigned($task, $employee));
+
+        return response()->json(['task' => $task, 'message' => 'Task created successfully']);
     }
 
-
-    public function edit($id){
-
-        $task = task::where('id',$id)->first(); //use first method for get all data
-        return view('tasks.edit',['task' => $task]);
-
-        // $task = Task::find($id);
-        // return view('tasks.edit', ['task' => $task]);
-
-}
-
-public function update(Request $request, $id)
-{
-    // Retrieve the task by its ID
-    $task = Task::find($id);
-
-    if (!$task) {
-        return response()->json(['error' => 'Task not found'], 404);
+    public function edit($id)
+    {
+        $task = Task::where('id', $id)->first();
+        return view('tasks.edit', ['task' => $task]);
     }
 
-    // Update the task's attributes
-    $task->title = $request->title;
-    $task->description = $request->description;
-    $task->deadline = $request->deadline;
-    $task->status_id = $request->status_id;
-    $task->assinged_by = $request->assinged_by;
-    $task->assigned_to = $request->assigned_to;
+    public function update(Request $request, $id)
+    {
+        $task = Task::findOrFail($id);
 
+        $validated = $request->validate([
+            'title' => 'sometimes|required|max:255',
+            'description' => 'sometimes|required',
+            'deadline' => 'sometimes|required|date',
+            'assigned_to' => 'sometimes|required|exists:employees,id',
+        ]);
 
-    // return back()->with( 'success','Task Updated successfully');
+        $task->update($validated);
 
-    $task->save();
+        if ($request->has('assigned_to')) {
+            TaskAssignment::updateOrCreate(
+                ['task_id' => $task->id],
+                ['employee_id' => $validated['assigned_to']]
+            );
+        }
 
-    return response()->json(['task' => $task]);
-}
-
-
-public function destroy($id)
-{
-    $task = Task::find($id);
-
-    if (!$task) {
-        return response()->json(['error' => 'Task not found'], 404);
+        return response()->json(['task' => $task, 'message' => 'Task updated successfully']);
     }
 
-    $task->delete();
+    public function destroy($id)
+    {
+        $task = Task::find($id);
 
-    return response()->json(['message' => 'Task deleted successfully']);
-}
+        if (!$task) {
+            return response()->json(['error' => 'Task not found'], 404);
+        }
 
+        $task->delete();
 
-    // public function show($id)
-    // {
-    //     $task = Task::find($id);
-
-    //     if (!$task) {
-    //         return redirect()->route('tasks.index')->with('error', 'Task not found');
-    //     }
-
-    //     return view('tasks.show', ['task' => $task]);
-    // }
+        return response()->json(['message' => 'Task deleted successfully']);
+    }
 
     public function show($id)
-{
-    $task = Task::find($id);
+    {
+        $task = Task::with('employees')->find($id);
 
-    if (!$task) {
-        return response()->json(['error' => 'Task not found'], 404);
+        if (!$task) {
+            return response()->json(['error' => 'Task not found'], 404);
+        }
+
+        return response()->json(['task' => $task]);
     }
 
-    return response()->json(['task' => $task]);
-}
+    public function getStatuses()
+    {
+        $statuses = TaskStatus::with(['task', 'employee'])->get();
 
+        return response()->json(['statuses' => $statuses]);
+    }
+
+    public function updateStatus(Request $request, $taskId)
+    {
+        $validated = $request->validate([
+            'status' => 'required|in:Not Started,In Progress,Completed',
+            'progress' => 'required|integer|between:0,100',
+        ]);
+
+        $task = Task::findOrFail($taskId);
+
+        // Update or create the status entry without employee_id
+        $status = TaskStatus::updateOrCreate(
+            ['task_id' => $taskId],
+            [
+                'status' => $validated['status'],
+                'progress' => $validated['progress'],
+            ]
+        );
+
+        return response()->json(['status' => $status, 'message' => 'Task status updated successfully']);
+    }
 
 }

@@ -5,6 +5,10 @@ use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\Taskcontroller;
 
+
+use Illuminate\Support\Facades\Mail;
+use App\Mail\TaskAssigned;
+
 /*
 |--------------------------------------------------------------------------
 | Web Routes
@@ -56,3 +60,10 @@ Route::delete('tasks/{task}', [Taskcontroller::class, 'destroy'])->name('tasks.d
 
 // Show Task
 Route::get('tasks/{id}/show', [Taskcontroller::class, 'show'])->name('tasks.show');
+
+
+Route::get('/test-email', function () {
+    $task = App\Models\Task::first(); // Assuming you have a task in your database
+    Mail::to('your-email@example.com')->send(new TaskAssigned($task));
+    return 'Test email sent!';
+});

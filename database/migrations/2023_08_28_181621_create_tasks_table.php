@@ -17,9 +17,9 @@ return new class extends Migration
             $table->text('description');
             $table->text('deadline');
             // $table->date('deadline');
-            $table->string('status_id');
-            $table->string('assinged_by');
-            $table->string('assigned_to');
+            // $table->string('status_id');
+            $table->unsignedBigInteger('assigned_by')->nullable();
+            $table->unsignedBigInteger('assigned_to')->nullable();
             $table->timestamps();
         });
     }
